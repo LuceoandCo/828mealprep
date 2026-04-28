@@ -54,10 +54,12 @@ nav{position:sticky;top:0;z-index:100;background:var(--blk);border-bottom:2px so
 .zones-inner{max-width:860px;margin:0 auto;display:flex;align-items:center;gap:16px;flex-wrap:wrap;justify-content:center;}
 .zones-label{font-size:9px;letter-spacing:4px;color:#7a9a2a;text-transform:uppercase;font-weight:700;white-space:nowrap;}
 .zones-chips{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;}
-.zchip{display:flex;align-items:center;gap:8px;background:rgba(122,154,42,.12);border:1px solid rgba(122,154,42,.28);border-radius:20px;padding:7px 16px;}
-.zchip-name{font-family:"Bebas Neue",cursive;font-size:17px;letter-spacing:1.5px;color:#fff;}
-.zchip-day{font-size:9px;letter-spacing:2px;color:#7a9a2a;text-transform:uppercase;}
-.zchip-dot{width:5px;height:5px;background:#7a9a2a;border-radius:50%;}
+.zchip{display:flex;align-items:center;gap:10px;background:rgba(122,154,42,.12);border:1px solid rgba(122,154,42,.28);border-radius:20px;padding:8px 18px;}
+.zchip-text{display:flex;flex-direction:column;gap:2px;}
+.zchip-name{font-family:"Bebas Neue",cursive;font-size:17px;letter-spacing:1.5px;color:#fff;white-space:nowrap;}
+.zchip-day{font-size:9px;letter-spacing:1.5px;color:#7a9a2a;text-transform:uppercase;white-space:nowrap;}
+.zchip-dot{width:6px;height:6px;background:#7a9a2a;border-radius:50%;flex-shrink:0;}
+@media(max-width:480px){.zchip-name{font-size:14px;letter-spacing:1px;}.zchip-day{font-size:8px;}}
 .trust{background:var(--grn);display:flex;justify-content:center;gap:32px;padding:14px 20px;flex-wrap:wrap;}
 .ti{display:flex;align-items:center;gap:7px;color:rgba(255,255,255,.82);font-size:11px;letter-spacing:1.5px;}
 .ti span{font-size:17px;}
@@ -641,10 +643,11 @@ var cart = {}, addonCart = {}, detectedZone = null;
 /* ── ZONES BANNER ── */
 function renderZonesBanner() {
   var chips = document.getElementById("zones-chips");
-  var day = (D.zones.avl && D.zones.avl.day) ? D.zones.avl.day : "Confirmed at booking";
-  var html = "<div class=\"zchip\"><div class=\"zchip-dot\"></div>";
+  var day = (D.zones.avl && D.zones.avl.day) ? D.zones.avl.day : "Delivery day varies by area";
+  var html = "<div class=\"zchip\"><div class=\"zchip-dot\"></div><div class=\"zchip-text\">";
   html += "<div class=\"zchip-name\">Asheville &amp; Surrounding Areas</div>";
-  html += "<div class=\"zchip-day\">" + day + "</div></div>";
+  html += "<div class=\"zchip-day\">" + day + "</div>";
+  html += "</div></div>";
   chips.innerHTML = html;
 }
 
