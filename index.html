@@ -586,7 +586,13 @@ footer a{color:var(--carrot);text-decoration:none;}
   <span style="display:block;font-size:10px;opacity:.7;margin-top:8px;letter-spacing:1.5px;">Built with love by <a href="https://luceoandco.com" target="_blank" style="color:var(--carrot);text-decoration:none;">Luceo &amp; Co</a></span>
 </footer>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
+/* ── SUPABASE (828 Meal Prep menu database) ── */
+var SB_URL = "https://oavkqviufmhjowiaelvz.supabase.co";
+var SB_KEY = "sb_publishable_9_05oYxHPUMd9axpm6SrpQ_Udtfpk-C";
+var sb = (window.supabase && window.supabase.createClient) ? window.supabase.createClient(SB_URL, SB_KEY) : null;
+
 var Z = {
   avl:   {lat:35.6281, lng:-82.5658, radius:15},
   hendo: {lat:35.3218, lng:-82.4607, radius:14},
@@ -628,6 +634,8 @@ var ZICONS = {avl:"&#127956;", hendo:"&#127944;", waynes:"&#127807;", out:"&#128
 var ZSTYLE = {avl:"zc-avl", hendo:"zc-hendo", waynes:"zc-waynes", out:"zc-out"};
 var ZORD   = {avl:"oz-avl", hendo:"oz-hendo", waynes:"oz-waynes", out:"oz-out"};
 
+/* Synchronous load: reads from the local cache (filled by loadFromCloud).
+   Falls back to defaults on very first paint before the cloud responds. */
 function loadData() {
   return {
     week:  localStorage.getItem("828week")   || DEF_WEEK,
@@ -635,6 +643,37 @@ function loadData() {
     meals: JSON.parse(localStorage.getItem("828meals")  || "null") || DEF_MEALS,
     addons:JSON.parse(localStorage.getItem("828addons") || "null") || DEF_ADDONS
   };
+}
+
+/* Pull the live menu from Supabase, cache it locally, then re-render.
+   The local cache keeps the site working instantly and offline; the cloud
+   is the single source of truth that every device and customer shares. */
+function loadFromCloud(cb) {
+  if(!sb) { if(cb) cb(); return; }
+  var done = 0, total = 2, gotMeals = null, gotSettings = null;
+  function finish() {
+    done++;
+    if(done < total) return;
+    if(gotMeals) {
+      var meals = gotMeals.map(function(r){
+        return {id:r.id, active:r.active, name:r.name, desc:r.descr||"", price:Number(r.price), tags:r.tags||[]};
+      });
+      localStorage.setItem("828meals", JSON.stringify(meals));
+    }
+    if(gotSettings) {
+      if(gotSettings.week)  localStorage.setItem("828week", gotSettings.week);
+      if(gotSettings.zones) localStorage.setItem("828zones", JSON.stringify(gotSettings.zones));
+    }
+    if(cb) cb();
+  }
+  sb.from("meals").select("*").order("sort_order",{ascending:true}).then(function(res){
+    if(!res.error && res.data) gotMeals = res.data;
+    finish();
+  });
+  sb.from("settings").select("*").eq("id",1).single().then(function(res){
+    if(!res.error && res.data) gotSettings = res.data;
+    finish();
+  });
 }
 
 var D = loadData();
@@ -1025,8 +1064,10 @@ function goto(page) {
 function openAdmin() {
   var p = prompt("Admin password:");
   if(p !== "828admin") return;
-  buildAdminUI();
   document.getElementById("adm-ov").classList.add("open");
+  /* Pull the latest live menu before editing so Zak never edits a stale copy */
+  loadFromCloud(function(){ buildAdminUI(); });
+  buildAdminUI();
 }
 function closeAdmin() { document.getElementById("adm-ov").classList.remove("open"); }
 function adminTab(tab, btn) {
@@ -1055,7 +1096,9 @@ function mealRow(m, i) {
     var on = (m.tags||[]).indexOf(allT[t]) > -1 ? "on" : "";
     h += "<button class=\"tt "+on+"\" data-i=\""+i+"\" data-tag=\""+allT[t]+"\" onclick=\"togTag(this)\">" + allT[t].toUpperCase() + "</button>";
   }
-  h += "</div></div>";
+  h += "</div>";
+  h += "<button class=\"me-del\" data-i=\""+i+"\" onclick=\"deleteMenuItem(this)\" style=\"margin-top:8px;background:none;border:1px solid #c0392b;color:#c0392b;border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;\">Delete this item</button>";
+  h += "</div>";
   return h;
 }
 
@@ -1086,6 +1129,7 @@ function buildAdminUI() {
   });
   var mh = "";
   for(var i=0; i<D.meals.length; i++)  mh += mealRow(D.meals[i], i);
+  mh += "<button class=\"adm-additem\" onclick=\"addMenuItem()\" style=\"width:100%;padding:14px;margin-top:10px;background:var(--carrot,#c4956a);color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;\">+ Add New Menu Item</button>";
   document.getElementById("adm-meals-list").innerHTML = mh;
   var ah = "";
   for(var j=0; j<D.addons.length; j++) ah += addonRow(D.addons[j], j);
@@ -1171,14 +1215,89 @@ function saveAdmin() {
     a.price = parseFloat(document.getElementById("ap-"+i).value) || a.price;
     a.desc  = document.getElementById("ad-"+i).value || a.desc;
   });
+
+  /* Always cache locally so the site is instant + offline-safe */
   localStorage.setItem("828week",  D.week);
   localStorage.setItem("828zones", JSON.stringify(D.zones));
   localStorage.setItem("828meals", JSON.stringify(D.meals));
   localStorage.setItem("828addons",JSON.stringify(D.addons));
-  closeAdmin();
-  renderMenu();
-  alert("Saved!");
+
+  if(!sb) {
+    closeAdmin(); renderMenu();
+    alert("Saved on this device. (Cloud sync unavailable right now.)");
+    return;
+  }
+
+  /* Push to Supabase so every device + customer sees it */
+  var saveBtn = document.querySelector(".adm-save");
+  if(saveBtn){ saveBtn.disabled = true; saveBtn.textContent = "Saving..."; }
+
+  var mealRows = D.meals.map(function(m, i){
+    return {id:m.id, active:m.active, name:m.name, descr:m.desc, price:m.price, tags:m.tags||[], sort_order:i+1};
+  });
+
+  Promise.all([
+    sb.from("meals").upsert(mealRows),
+    sb.from("settings").update({week:D.week, zones:D.zones}).eq("id",1)
+  ]).then(function(results){
+    if(saveBtn){ saveBtn.disabled = false; saveBtn.textContent = "\uD83D\uDCBE Save Changes"; }
+    var err = results[0].error || results[1].error;
+    if(err){
+      alert("Saved on this device, but cloud sync hit a snag: " + err.message + "\n\nYour changes are safe locally. Try Save again in a moment.");
+      return;
+    }
+    closeAdmin(); renderMenu();
+    alert("Saved! Your menu is now live for everyone.");
+  }).catch(function(e){
+    if(saveBtn){ saveBtn.disabled = false; saveBtn.textContent = "\uD83D\uDCBE Save Changes"; }
+    alert("Saved on this device, but cloud sync failed. Your changes are safe locally. Check your connection and Save again.");
+  });
 }
+
+function addMenuItem() {
+  var name = prompt("New menu item name:");
+  if(!name || !name.trim()) return;
+  var priceStr = prompt("Price (numbers only, e.g. 22):");
+  var price = parseFloat(priceStr) || 0;
+  var desc = prompt("Short description:") || "";
+  /* capture any in-progress edits to existing rows first so they aren't lost */
+  D.meals.forEach(function(m,i){
+    var nEl=document.getElementById("mn-"+i), pEl=document.getElementById("mp-"+i), dEl=document.getElementById("md-"+i);
+    if(nEl) m.name = nEl.value || m.name;
+    if(pEl) m.price = parseFloat(pEl.value) || m.price;
+    if(dEl) m.desc = dEl.value || m.desc;
+  });
+  var newId = "m" + Date.now();
+  D.meals.push({id:newId, active:true, name:name.trim(), desc:desc.trim(), price:price, tags:[]});
+  buildAdminUI();
+  alert("Added \"" + name.trim() + "\". It is ON by default. Tap Save Changes to make it live for everyone.");
+}
+
+function deleteMenuItem(btn) {
+  var i = parseInt(btn.getAttribute("data-i"),10);
+  var m = D.meals[i];
+  if(!m) return;
+  if(!confirm("Delete \"" + m.name + "\" permanently? This removes it for everyone. (To hide it temporarily instead, just toggle it OFF.)")) return;
+  var delId = m.id;
+  D.meals.forEach(function(mm,idx){
+    if(idx===i) return;
+    var nEl=document.getElementById("mn-"+idx), pEl=document.getElementById("mp-"+idx), dEl=document.getElementById("md-"+idx);
+    if(nEl) mm.name = nEl.value || mm.name;
+    if(pEl) mm.price = parseFloat(pEl.value) || mm.price;
+    if(dEl) mm.desc = dEl.value || mm.desc;
+  });
+  D.meals.splice(i,1);
+  if(sb) {
+    sb.from("meals").delete().eq("id",delId).then(function(res){
+      localStorage.setItem("828meals", JSON.stringify(D.meals));
+      buildAdminUI(); renderMenu();
+    });
+  } else {
+    localStorage.setItem("828meals", JSON.stringify(D.meals));
+    buildAdminUI(); renderMenu();
+  }
+}
+
 function clearOrders() {
   if(!confirm("Clear all orders?")) return;
   localStorage.setItem("828orders",  "[]");
@@ -1192,6 +1311,11 @@ function clearInquiries() {
 }
 
 renderMenu();
+/* Pull the shared live menu from Supabase, then repaint with it. */
+loadFromCloud(function(){
+  renderMenu();
+  if(document.getElementById("adm-ov") && document.getElementById("adm-ov").classList.contains("open")) buildAdminUI();
+});
 </script>
 </body>
 </html>
